@@ -1,0 +1,88 @@
+version: '3.9'
+
+services:
+  postgres:
+    container_name: "airflow_postgres"
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - ./postgres/db:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "airflow" ]
+      interval: 5s
+      retries: 5
+    restart: always
+
+  airflow-init:
+    container_name: "airflow-init"
+    image: apache/airflow:2.4.2-python3.10
+    env_file: ./airflow.env
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db check || echo "Hello World" && airflow db init && airflow users create --role Admin --username airflow --password airflow --email airflow@airflow.com --firstname airflow --lastname airflow
+    restart: on-failure
+    healthcheck:
+      test: "exit 0"
+    depends_on:
+      - "postgres"
+
+  airflow-webserver:
+    container_name: "airflow-webserver"
+    image: apache/airflow:2.4.2-python3.10
+    command: webserver
+    ports:
+      - 8080:8080
+    env_file: ./airflow.env
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "http://localhost:8080/health"
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    user: "1000"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+  airflow-scheduler:
+    container_name: "airflow-scheduler"
+    image: apache/airflow:2.4.2-python3.10
+    command: scheduler
+    env_file: ./airflow.env
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"'
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    user: "1000"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    depends_on:
+      - "airflow-webserver"
+volumes:
+  db:
+  dags:
+  logs:
+  plugins:
